@@ -102,8 +102,12 @@ func TestRun_TwoSchedulersSingleDispatcher(t *testing.T) {
 	go func() { doneB <- sB.Run(ctx) }()
 	time.Sleep(1500 * time.Millisecond)
 	cancel()
-	<-doneA
-	<-doneB
+	if err := <-doneA; err != nil && err != context.Canceled {
+		t.Fatalf("scheduler A: %v", err)
+	}
+	if err := <-doneB; err != nil && err != context.Canceled {
+		t.Fatalf("scheduler B: %v", err)
+	}
 
 	aAcquired := bytes.Contains(bufA.Bytes(), []byte("acquired scheduler leadership"))
 	bAcquired := bytes.Contains(bufB.Bytes(), []byte("acquired scheduler leadership"))
