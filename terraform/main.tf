@@ -26,6 +26,12 @@ data "aws_dynamodb_table" "terraform_locks" {
   name = "terraform-locks-job-scheduler"
 }
 
+module "kms" {
+  source = "./modules/kms"
+
+  environment = var.environment
+}
+
 module "networking" {
   source = "./modules/networking"
 
@@ -38,23 +44,30 @@ module "networking" {
   random_suffix        = random_id.suffix.hex
 }
 
+module "ecr_iam" {
+  source = "./modules/ecr-iam"
+
+  environment       = var.environment
+  random_suffix     = random_id.suffix.hex
+  rds_kms_key_arn   = module.kms.rds_kms_key_arn
+  redis_kms_key_arn = module.kms.redis_kms_key_arn
+  aws_region        = var.aws_region
+}
+
 module "rds" {
   source = "./modules/rds"
 
-  environment             = var.environment
-  vpc_id                  = module.networking.vpc_id
-  private_subnet_ids      = module.networking.private_subnet_ids
-  db_security_group_ids   = module.networking.db_security_group_ids
-  db_instance_class       = var.db_instance_class
-  db_allocated_storage    = var.db_allocated_storage
-  db_name                 = var.db_name
-  db_username             = var.db_username
-  db_password             = var.db_password
-  api_task_role_arn       = module.ecr_iam.api_task_role_arn
-  scheduler_task_role_arn = module.ecr_iam.scheduler_task_role_arn
-  worker_task_role_arn    = module.ecr_iam.worker_task_role_arn
-  ecs_execution_role_arn  = module.ecr_iam.execution_role_arn
-  random_suffix           = random_id.suffix.hex
+  environment           = var.environment
+  vpc_id                = module.networking.vpc_id
+  private_subnet_ids    = module.networking.private_subnet_ids
+  db_security_group_ids = module.networking.db_security_group_ids
+  db_instance_class     = var.db_instance_class
+  db_allocated_storage  = var.db_allocated_storage
+  db_name               = var.db_name
+  db_username           = var.db_username
+  db_password           = var.db_password
+  rds_kms_key_arn       = module.kms.rds_kms_key_arn
+  random_suffix         = random_id.suffix.hex
 }
 
 module "elasticache" {
@@ -67,20 +80,8 @@ module "elasticache" {
   node_type                = var.redis_node_type
   num_cache_nodes          = var.redis_num_nodes
   engine_version           = var.redis_engine_version
-  api_task_role_arn        = module.ecr_iam.api_task_role_arn
-  scheduler_task_role_arn  = module.ecr_iam.scheduler_task_role_arn
-  worker_task_role_arn     = module.ecr_iam.worker_task_role_arn
-  ecs_execution_role_arn   = module.ecr_iam.execution_role_arn
+  redis_kms_key_arn        = module.kms.redis_kms_key_arn
   random_suffix            = random_id.suffix.hex
-}
-
-module "ecr_iam" {
-  source = "./modules/ecr-iam"
-
-  environment       = var.environment
-  random_suffix     = random_id.suffix.hex
-  rds_kms_key_arn   = module.rds.rds_kms_key_arn
-  redis_kms_key_arn = module.elasticache.redis_kms_key_arn
 }
 
 module "github_oidc" {
@@ -125,4 +126,5 @@ module "ecs_alb" {
   memory                   = var.fargate_memory
   random_suffix            = random_id.suffix.hex
   monthly_budget_limit_usd = var.monthly_budget_limit_usd
+  aws_region               = var.aws_region
 }
