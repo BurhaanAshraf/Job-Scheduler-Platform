@@ -9,69 +9,6 @@ resource "aws_db_subnet_group" "main" {
   }
 }
 
-# KMS Key for RDS encryption
-resource "aws_kms_key" "rds" {
-  description             = "KMS key for RDS encryption"
-  deletion_window_in_days = 10
-  enable_key_rotation     = true
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "Allow administration of the key"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action = [
-          "kms:*"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "Allow RDS to use the key"
-        Effect = "Allow"
-        Principal = {
-          Service = "rds.amazonaws.com"
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "Allow ECS tasks to decrypt secrets"
-        Effect = "Allow"
-        Principal = {
-          AWS = [
-            var.api_task_role_arn,
-            var.scheduler_task_role_arn,
-            var.worker_task_role_arn,
-            var.ecs_execution_role_arn
-          ]
-        }
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-
-  tags = {
-    Name        = "${var.environment}-rds-key"
-    Environment = var.environment
-  }
-}
-
-data "aws_caller_identity" "current" {}
-
 # DB Parameter Group (PostgreSQL 16 to match local compose stack)
 resource "aws_db_parameter_group" "main" {
   name        = "${var.environment}-pg16-params"
@@ -99,7 +36,7 @@ resource "aws_db_instance" "main" {
   allocated_storage           = var.db_allocated_storage
   max_allocated_storage       = 100
   storage_encrypted           = true
-  kms_key_id                  = aws_kms_key.rds.arn
+  kms_key_id                  = var.rds_kms_key_arn
   db_name                     = var.db_name
   username                    = var.db_username
   password                    = var.db_password
@@ -133,7 +70,7 @@ resource "aws_db_instance" "main" {
 resource "aws_secretsmanager_secret" "db_password" {
   name        = "${var.environment}/job-scheduler/db-password"
   description = "Postgres DSN for Job Scheduler (JOB_SCHEDULER_DB_DSN)"
-  kms_key_id  = aws_kms_key.rds.arn
+  kms_key_id  = var.rds_kms_key_arn
 
   tags = {
     Name        = "${var.environment}-db-password"

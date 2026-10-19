@@ -23,8 +23,3 @@ output "db_secret_name" {
   value       = aws_secretsmanager_secret.db_password.name
   description = "Secrets Manager secret name"
 }
-
-output "rds_kms_key_arn" {
-  value       = aws_kms_key.rds.arn
-  description = "RDS KMS key ARN"
-}
