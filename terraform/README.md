@@ -2,15 +2,17 @@
 
 This directory contains the Terraform configuration to provision the complete AWS infrastructure for the Job Scheduler Platform.
 
+**For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)**
+
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        VPC (10.0.0.0/16)                     │
+│                        VPC (10.x.0.0/16)                     │
 │  ┌─────────────────────┐    ┌─────────────────────────────┐ │
 │  │   Public Subnets    │    │      Private Subnets        │ │
-│  │  (10.0.1.0/24,      │    │  (10.0.11.0/24,             │ │
-│  │   10.0.2.0/24)      │    │   10.0.12.0/24)             │ │
+│  │  (10.x.1.0/24,      │    │  (10.x.11.0/24,             │ │
+│  │   10.x.2.0/24)      │    │   10.x.12.0/24)             │ │
 │  │                     │    │                             │ │
 │  │  ALB (port 80/443)  │    │  ECS Tasks (API, Scheduler, │ │
 │  │                     │    │  Worker)                    │ │
@@ -25,37 +27,43 @@ This directory contains the Terraform configuration to provision the complete AW
 ### Prerequisites
 - Terraform >= 1.5
 - AWS CLI configured with appropriate credentials
-- AWS account with permissions for VPC, RDS, ElastiCache, ECS, ECR, IAM, ALB, Secrets Manager
+- AWS account with permissions for VPC, RDS, ElastiCache, ECS, ECR, IAM, ALB, Secrets Manager, S3, DynamoDB, KMS, CloudWatch, SNS, Budgets
 
-### Initialize (pick ONE environment per working copy)
+### One-time Backend Setup (per AWS account)
 
-Backend state keys are per environment (`dev/terraform.tfstate`,
-`prod/terraform.tfstate`). Never share one key between envs.
+```bash
+# Create S3 bucket for Terraform state
+aws s3api create-bucket \
+  --bucket job-scheduler-terraform-state-burhaan \
+  --region ap-south-2 \
+  --create-bucket-configuration LocationConstraint=ap-south-2
+
+aws s3api put-bucket-versioning --bucket job-scheduler-terraform-state-burhaan --versioning-configuration Status=Enabled
+aws s3api put-bucket-encryption --bucket job-scheduler-terraform-state-burhaan --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+# Create DynamoDB table for state locking
+aws dynamodb create-table \
+  --table-name terraform-locks-job-scheduler \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region ap-south-2
+```
+
+### Initialize & Deploy
 
 ```bash
 cd terraform
-terraform init -reconfigure -backend-config=backend-dev.hcl   # dev
-# or
-terraform init -reconfigure -backend-config=backend-prod.hcl   # prod
-```
 
-### Plan
+# Set required password
+export TF_VAR_db_password='your-secure-password'
 
-```bash
 # Development
-terraform plan -var-file=dev.tfvars
-
-# Production
-terraform plan -var-file=prod.tfvars
-```
-
-### Apply
-
-```bash
-# Development
+terraform init -reconfigure -backend-config=backend-dev.hcl
 terraform apply -var-file=dev.tfvars
 
-# Production
+# Production (separate state)
+terraform init -reconfigure -backend-config=backend-prod.hcl
 terraform apply -var-file=prod.tfvars
 ```
 
@@ -63,32 +71,35 @@ terraform apply -var-file=prod.tfvars
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `db_password` | Database master password (also becomes the DSN in Secrets Manager) | Yes |
+| `db_password` | Database master password (stored in Secrets Manager as DSN) | **Yes** |
 
 ```bash
 export TF_VAR_db_password='...'   # never commit this value
-terraform plan -var-file=dev.tfvars
 ```
 
 There is intentionally NO Redis password: ElastiCache runs without AUTH
 (the Go client has no TLS support) and is isolated by security group in
-private subnets. See "Secrets Management" below.
+private subnets.
 
 ### Outputs
 
 After apply, key outputs:
 - `alb_dns_name` - ALB DNS name for API access
 - `api_ecr_url`, `scheduler_ecr_url`, `worker_ecr_url` - ECR repository URLs for Docker pushes
-- `db_endpoint` - RDS endpoint
-- `redis_endpoint` - ElastiCache Redis endpoint
+- `db_endpoint` - RDS endpoint (sensitive)
+- `redis_endpoint` - ElastiCache Redis endpoint (sensitive)
+- `deploy_role_arn` - GitHub Actions OIDC role ARN (add to GitHub secrets)
+- `sns_topic_arn` - SNS topic for alarm notifications
 
 ## Modules
 
-- `networking` - VPC, subnets, IGW, route tables, security groups
+- `kms` - KMS keys for RDS & Redis encryption (created first, no dependencies)
+- `networking` - VPC, subnets, IGW, route tables, security groups, S3 gateway endpoint
 - `rds` - PostgreSQL RDS instance in private subnets
 - `elasticache` - Redis ElastiCache cluster in private subnets
-- `ecr-iam` - ECR repositories and IAM roles
-- `ecs-alb` - ECS cluster, Fargate services, ALB, autoscaling
+- `ecr-iam` - ECR repositories and IAM roles (execution, task roles with KMS decrypt)
+- `github-oidc` - GitHub Actions OIDC deploy role for CI/CD
+- `ecs-alb` - ECS cluster, Fargate services, ALB, autoscaling, CloudWatch alarms
 
 ## Cost profile (personal project, ~$60/mo dev)
 
