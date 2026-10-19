@@ -9,69 +9,6 @@ resource "aws_elasticache_subnet_group" "main" {
   }
 }
 
-# KMS Key for Redis encryption
-resource "aws_kms_key" "redis" {
-  description             = "KMS key for ElastiCache encryption"
-  deletion_window_in_days = 10
-  enable_key_rotation     = true
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "Allow administration of the key"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action = [
-          "kms:*"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "Allow ElastiCache to use the key"
-        Effect = "Allow"
-        Principal = {
-          Service = "elasticache.amazonaws.com"
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "Allow ECS tasks to decrypt secrets"
-        Effect = "Allow"
-        Principal = {
-          AWS = [
-            var.api_task_role_arn,
-            var.scheduler_task_role_arn,
-            var.worker_task_role_arn,
-            var.ecs_execution_role_arn
-          ]
-        }
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-
-  tags = {
-    Name        = "${var.environment}-redis-key"
-    Environment = var.environment
-  }
-}
-
-data "aws_caller_identity" "current" {}
-
 # ElastiCache Parameter Group
 resource "aws_elasticache_parameter_group" "main" {
   name        = "${var.environment}-redis-params"
@@ -90,6 +27,9 @@ resource "aws_elasticache_parameter_group" "main" {
 }
 
 # ElastiCache Cluster (using cluster mode for simpler configuration)
+# NOTE: Encryption at rest (KMS) is only supported for replication groups,
+# not for simple clusters. The redis_kms_key_arn variable is kept for
+# future migration to replication group or for snapshot encryption.
 resource "aws_elasticache_cluster" "main" {
   cluster_id           = "${var.environment}-job-scheduler-redis"
   engine               = "redis"

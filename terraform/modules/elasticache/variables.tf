@@ -38,22 +38,7 @@ variable "random_suffix" {
   description = "Random suffix for unique naming"
 }
 
-variable "api_task_role_arn" {
+variable "redis_kms_key_arn" {
   type        = string
-  description = "API task role ARN"
-}
-
-variable "scheduler_task_role_arn" {
-  type        = string
-  description = "Scheduler task role ARN"
-}
-
-variable "worker_task_role_arn" {
-  type        = string
-  description = "Worker task role ARN"
-}
-
-variable "ecs_execution_role_arn" {
-  type        = string
-  description = "ECS execution role ARN"
+  description = "Redis KMS key ARN"
 }

@@ -13,8 +13,3 @@ output "redis_cluster_id" {
   value       = aws_elasticache_cluster.main.cluster_id
   description = "Redis cluster ID"
 }
-
-output "redis_kms_key_arn" {
-  value       = aws_kms_key.redis.arn
-  description = "Redis KMS key ARN"
-}
